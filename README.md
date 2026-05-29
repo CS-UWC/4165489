@@ -2,12 +2,6 @@
 
 # Evaluating Trust-Based Robustness in Heterogeneous IoT Networks
 
-**Lavhelani Mano**
-Student Number: 4165489
-Email: 4165489@myuwc.ac.za
-Honours Project — University of the Western Cape
-Department of Computer Science
-
 ---
 
 ## Abstract
@@ -498,22 +492,6 @@ This project is submitted in partial fulfilment of the requirements for the Hono
 - Dynamic dashboard design for scalable node monitoring
 - Network deployment using Nginx reverse proxy and Cloudflare tunnelling
 - Empirical evaluation of trust scoring as a potential attack surface
-
----
-
-## References
-
-[1] Yan, Z., et al. — Trust management in IoT: A comprehensive review
-[2] Rajput, et al. — Trust evaluation mechanisms in IoT
-[3] Bao, F., et al. — Hierarchical trust models combining direct and indirect trust
-[4] Guo, J., et al. — Multi-metric trust computation models
-[5] Guo, J., et al. — Combining behavioural indicators for trust scoring
-[6] Bampatsikos, et al. — Probabilistic and predictive trust models
-[7] Doshi, R., et al. — Machine learning for DDoS detection in IoT
-[8] Nguyen, T., et al. — Federated learning-based anomaly detection
-[9] Chatterjee, S., Ahmed, M. — Survey of anomaly detection in IoT
-[10] Moustafa, N., et al. — Intrusion detection systems in IoT
-[11] Adversarial machine learning and trust manipulation
 
 ---
 
