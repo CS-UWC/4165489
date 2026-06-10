@@ -326,11 +326,26 @@ def sensor_badge(label, value, color="#00d4ff"):
         html.P(str(value), style={'color': 'white', 'fontSize': '16px', 'margin': '0', 'fontWeight': 'bold'})
     ])
 
-def node_card(node_id, bti_val, sensors, online, alert_text):
+def metric_badge(label, value, color):
+    return html.Div(style={
+        'backgroundColor': '#0f0f1a',
+        'border': f'1px solid {color}',
+        'borderRadius': '8px',
+        'padding': '8px 14px',
+        'textAlign': 'center',
+        'minWidth': '70px',
+        'flex': '1'
+    }, children=[
+        html.P(label, style={'color': color, 'fontSize': '10px', 'letterSpacing': '2px', 'margin': '0', 'fontWeight': 'bold'}),
+        html.P(f"{value:.2f}", style={'color': 'white', 'fontSize': '20px', 'margin': '0', 'fontWeight': 'bold'})
+    ])
+
+def node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P):
     color = bti_color(bti_val)
     status_color = "#00ff88" if online else "#ff3b3b"
     status_text = "ONLINE" if online else "OFFLINE"
 
+    # Sensor badges
     badges = []
     for k, v in sensors.items():
         if k not in ('node', 'ip', 'rssi'):
@@ -345,6 +360,8 @@ def node_card(node_id, bti_val, sensors, online, alert_text):
         'padding': '20px',
         'marginBottom': '20px'
     }, children=[
+
+        # Header row — node name + online status
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '12px'}, children=[
             html.H3(node_id.upper(), style={'color': color, 'margin': '0'}),
             html.Span(status_text, style={
@@ -356,12 +373,33 @@ def node_card(node_id, bti_val, sensors, online, alert_text):
                 'fontWeight': 'bold'
             }),
         ]),
-        html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '10px', 'marginBottom': '12px'}, children=[
+
+        # BTI score + alert
+        html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '10px', 'marginBottom': '16px'}, children=[
             html.Span("BTI:", style={'color': '#aaa', 'fontSize': '13px'}),
-            html.Span(f"{bti_val:.3f}", style={'color': color, 'fontSize': '24px', 'fontWeight': 'bold'}),
+            html.Span(f"{bti_val:.3f}", style={'color': color, 'fontSize': '28px', 'fontWeight': 'bold'}),
             html.Span(f"| {alert_text}" if alert_text else "", style={'color': '#ff3b3b', 'fontSize': '13px'})
         ]),
+
+        # F T D P metric badges
+        html.P("BEHAVIOURAL METRICS", style={'color': '#555', 'fontSize': '10px', 'letterSpacing': '2px', 'margin': '0 0 8px 0'}),
+        html.Div(style={'display': 'flex', 'gap': '10px', 'marginBottom': '16px'}, children=[
+            metric_badge("F", F, "#00d4ff"),
+            metric_badge("T", T, "#7c3aed"),
+            metric_badge("D", D, "#00ff88"),
+            metric_badge("P", P, "#ffaa00"),
+        ]),
+
+        # Divider
+        html.Hr(style={'borderColor': '#2a2a3e', 'margin': '0 0 12px 0'}),
+
+        # Sensor readings label
+        html.P("SENSOR READINGS", style={'color': '#555', 'fontSize': '10px', 'letterSpacing': '2px', 'margin': '0 0 8px 0'}),
+
+        # Sensor badges
         html.Div(style={'display': 'flex', 'gap': '10px', 'flexWrap': 'wrap'}, children=badges),
+
+        # IP address
         html.P(f"IP: {sensors.get('ip', 'N/A')}", style={'color': '#555', 'fontSize': '11px', 'marginTop': '10px', 'marginBottom': '0'})
     ])
 
@@ -527,7 +565,9 @@ def update(n):
 
         online = is_online(node_id)
         sensors = node_data[node_id]['sensors']
-        cards.append(node_card(node_id, bti_val, sensors, online, alert_text))
+
+        # Pass F T D P into node_card
+        cards.append(node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P))
 
     net_bti = compute_network_bti()
     network_bti_history.append(net_bti)
