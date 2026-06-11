@@ -19,6 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 # GLOBAL STATE
 # =========================
 message_log = []
+network_messages = deque(maxlen=50)  # inter-node network messages
 
 node_data = defaultdict(lambda: {
     'sensors': {},
@@ -38,6 +39,7 @@ node_data = defaultdict(lambda: {
 network_bti_history = deque(maxlen=200)
 network_time_axis = deque(maxlen=200)
 known_nodes = []
+network_alert_count = 0
 
 # =========================
 # MODEL
@@ -50,14 +52,16 @@ active_attack = "NONE"
 # MQTT
 # =========================
 MQTT_USER = "esp32user"
-MQTT_PASS = "password"  # replace with password
+MQTT_PASS = "mano7210"
 
 def on_message(client, userdata, msg):
+    global network_alert_count
     topic = msg.topic
     payload = msg.payload.decode()
 
     message_log.append(f"[{topic}] {payload}")
 
+    # ── Network status announcements ──
     if topic == "iot/network/status":
         try:
             data = json.loads(payload)
@@ -72,6 +76,48 @@ def on_message(client, userdata, msg):
             pass
         return
 
+    # ── Inter-node network messages ──
+    if topic == "iot/network/message":
+        try:
+            data = json.loads(payload)
+            timestamp = time.strftime("%H:%M:%S")
+            from_node = data.get('from', 'unknown')
+            event     = data.get('event', '')
+            alert     = data.get('alert', '')
+            value     = data.get('value', '')
+
+            if alert:
+                network_alert_count += 1
+                network_messages.appendleft({
+                    'time': timestamp,
+                    'from': from_node,
+                    'type': 'alert',
+                    'text': f"{alert} (value: {value})"
+                })
+            elif event:
+                network_messages.appendleft({
+                    'time': timestamp,
+                    'from': from_node,
+                    'type': 'event',
+                    'text': event
+                })
+            else:
+                network_messages.appendleft({
+                    'time': timestamp,
+                    'from': from_node,
+                    'type': 'info',
+                    'text': payload
+                })
+        except:
+            network_messages.appendleft({
+                'time': time.strftime("%H:%M:%S"),
+                'from': 'unknown',
+                'type': 'info',
+                'text': payload
+            })
+        return
+
+    # ── Node sensor data ──
     if topic.startswith("iot/") and topic.endswith("/data"):
         try:
             data = json.loads(payload)
@@ -239,6 +285,7 @@ def generate_pdf():
     content.append(Paragraph(f"Active Nodes: {len(known_nodes)}", styles['Normal']))
     content.append(Paragraph(f"Network BTI: {net_bti:.3f}", styles['Normal']))
     content.append(Paragraph(f"Simulated Attack: {active_attack}", styles['Normal']))
+    content.append(Paragraph(f"Inter-Node Alerts: {network_alert_count}", styles['Normal']))
     content.append(Spacer(1, 12))
 
     for node_id in known_nodes:
@@ -260,6 +307,16 @@ def generate_pdf():
                 if k != 'node':
                     content.append(Paragraph(f"  {k}: {v}", styles['Normal']))
 
+        content.append(Spacer(1, 12))
+
+    # Network messages log in PDF
+    if network_messages:
+        content.append(Paragraph("Inter-Node Network Messages", styles['Heading2']))
+        for nm in list(network_messages)[:20]:
+            content.append(Paragraph(
+                f"[{nm['time']}] {nm['from'].upper()} → {nm['text']}",
+                styles['Normal']
+            ))
         content.append(Spacer(1, 12))
 
     if len(network_bti_history) > 5:
@@ -302,7 +359,7 @@ def generate_pdf():
     content.append(Paragraph(conclusion, styles['Normal']))
     content.append(Spacer(1, 12))
 
-    content.append(Paragraph("Recent Messages", styles['Heading2']))
+    content.append(Paragraph("Recent MQTT Messages", styles['Heading2']))
     for msg in message_log[-15:]:
         content.append(Paragraph(msg, styles['Normal']))
 
@@ -345,10 +402,36 @@ def node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P):
     status_color = "#00ff88" if online else "#ff3b3b"
     status_text = "ONLINE" if online else "OFFLINE"
 
+    # Peer awareness badges
+    peer_badges = []
+    if 'node1_online' in sensors:
+        peer_color = "#00ff88" if sensors['node1_online'] else "#ff3b3b"
+        peer_badges.append(html.Span("NODE1", style={
+            'backgroundColor': peer_color, 'color': 'black',
+            'padding': '2px 8px', 'borderRadius': '10px',
+            'fontSize': '10px', 'fontWeight': 'bold', 'marginRight': '6px'
+        }))
+    if 'node2_online' in sensors:
+        peer_color = "#00ff88" if sensors['node2_online'] else "#ff3b3b"
+        peer_badges.append(html.Span("NODE2", style={
+            'backgroundColor': peer_color, 'color': 'black',
+            'padding': '2px 8px', 'borderRadius': '10px',
+            'fontSize': '10px', 'fontWeight': 'bold', 'marginRight': '6px'
+        }))
+    if 'node3_online' in sensors:
+        peer_color = "#00ff88" if sensors['node3_online'] else "#ff3b3b"
+        peer_badges.append(html.Span("NODE3", style={
+            'backgroundColor': peer_color, 'color': 'black',
+            'padding': '2px 8px', 'borderRadius': '10px',
+            'fontSize': '10px', 'fontWeight': 'bold', 'marginRight': '6px'
+        }))
+
     # Sensor badges
     badges = []
+    skip_keys = ('node', 'ip', 'rssi', 'node1_online', 'node2_online',
+                 'node3_online', 'node1_temp', 'node2_sound', 'network_alerts')
     for k, v in sensors.items():
-        if k not in ('node', 'ip', 'rssi'):
+        if k not in skip_keys:
             badges.append(sensor_badge(k.upper(), round(v, 2) if isinstance(v, float) else v))
     if 'rssi' in sensors:
         badges.append(sensor_badge("RSSI", sensors['rssi'], "#7c3aed"))
@@ -361,8 +444,8 @@ def node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P):
         'marginBottom': '20px'
     }, children=[
 
-        # Header row — node name + online status
-        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '12px'}, children=[
+        # Header row
+        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '8px'}, children=[
             html.H3(node_id.upper(), style={'color': color, 'margin': '0'}),
             html.Span(status_text, style={
                 'backgroundColor': status_color,
@@ -374,14 +457,20 @@ def node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P):
             }),
         ]),
 
-        # BTI score + alert
+        # Peer awareness row
+        html.Div(style={'marginBottom': '12px', 'display': 'flex', 'alignItems': 'center', 'gap': '4px'}, children=[
+            html.Span("PEERS:", style={'color': '#555', 'fontSize': '10px', 'marginRight': '6px', 'letterSpacing': '1px'}),
+            *peer_badges
+        ]) if peer_badges else html.Div(),
+
+        # BTI score
         html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '10px', 'marginBottom': '16px'}, children=[
             html.Span("BTI:", style={'color': '#aaa', 'fontSize': '13px'}),
             html.Span(f"{bti_val:.3f}", style={'color': color, 'fontSize': '28px', 'fontWeight': 'bold'}),
             html.Span(f"| {alert_text}" if alert_text else "", style={'color': '#ff3b3b', 'fontSize': '13px'})
         ]),
 
-        # F T D P metric badges
+        # F T D P metrics
         html.P("BEHAVIOURAL METRICS", style={'color': '#555', 'fontSize': '10px', 'letterSpacing': '2px', 'margin': '0 0 8px 0'}),
         html.Div(style={'display': 'flex', 'gap': '10px', 'marginBottom': '16px'}, children=[
             metric_badge("F", F, "#00d4ff"),
@@ -390,16 +479,12 @@ def node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P):
             metric_badge("P", P, "#ffaa00"),
         ]),
 
-        # Divider
         html.Hr(style={'borderColor': '#2a2a3e', 'margin': '0 0 12px 0'}),
 
-        # Sensor readings label
+        # Sensor readings
         html.P("SENSOR READINGS", style={'color': '#555', 'fontSize': '10px', 'letterSpacing': '2px', 'margin': '0 0 8px 0'}),
-
-        # Sensor badges
         html.Div(style={'display': 'flex', 'gap': '10px', 'flexWrap': 'wrap'}, children=badges),
 
-        # IP address
         html.P(f"IP: {sensors.get('ip', 'N/A')}", style={'color': '#555', 'fontSize': '11px', 'marginTop': '10px', 'marginBottom': '0'})
     ])
 
@@ -414,6 +499,26 @@ def card(title, id, color):
     }, children=[
         html.P(title, style={'color': color}),
         html.H2(id=id)
+    ])
+
+def network_message_row(nm):
+    type_color = "#ff3b3b" if nm['type'] == 'alert' else "#00d4ff" if nm['type'] == 'event' else "#aaa"
+    type_label = "ALERT" if nm['type'] == 'alert' else "EVENT" if nm['type'] == 'event' else "INFO"
+    return html.Div(style={
+        'display': 'flex',
+        'gap': '10px',
+        'alignItems': 'center',
+        'padding': '6px 0',
+        'borderBottom': '1px solid #1a1a2e'
+    }, children=[
+        html.Span(nm['time'], style={'color': '#555', 'fontSize': '11px', 'minWidth': '60px'}),
+        html.Span(type_label, style={
+            'color': type_color, 'fontSize': '10px', 'fontWeight': 'bold',
+            'border': f'1px solid {type_color}', 'padding': '1px 6px',
+            'borderRadius': '4px', 'minWidth': '44px', 'textAlign': 'center'
+        }),
+        html.Span(nm['from'].upper(), style={'color': '#00d4ff', 'fontSize': '11px', 'minWidth': '50px'}),
+        html.Span(nm['text'], style={'color': 'white', 'fontSize': '11px'}),
     ])
 
 # =========================
@@ -468,20 +573,37 @@ app.layout = html.Div(style={
 
     dcc.Download(id="download"),
 
+    # Network overview cards
     html.H3("Network Overview", style={'color': '#00d4ff'}),
     html.Div(style={'display': 'flex', 'gap': '20px', 'marginBottom': '20px'}, children=[
-        card("NETWORK BTI", "network-bti", "#00d4ff"),
-        card("ACTIVE NODES", "active-nodes", "#00ff88"),
-        card("ALERTS", "network-alerts", "#ff3b3b"),
+        card("NETWORK BTI",    "network-bti",    "#00d4ff"),
+        card("ACTIVE NODES",   "active-nodes",   "#00ff88"),
+        card("BTI ALERTS",     "network-alerts", "#ff3b3b"),
+        card("NODE ALERTS",    "node-alerts",    "#ffaa00"),
     ]),
 
     dcc.Graph(id='network-bti-graph'),
 
     html.Hr(style={'borderColor': '#1a1a2e', 'marginTop': '30px'}),
 
+    # Inter-node communication log
+    html.H3("Inter-Node Communication", style={'color': '#00d4ff'}),
+    html.Div(id='network-message-log', style={
+        'backgroundColor': '#1a1a2e',
+        'borderRadius': '12px',
+        'padding': '16px',
+        'marginBottom': '30px',
+        'maxHeight': '200px',
+        'overflowY': 'auto'
+    }),
+
+    html.Hr(style={'borderColor': '#1a1a2e'}),
+
+    # Node cards
     html.H3("Node Status", style={'color': '#00d4ff'}),
     html.Div(id='node-cards'),
 
+    # MQTT message log
     html.H3("Message Log"),
     html.Div(id='message-log', style={'fontSize': '12px', 'color': '#aaa'}),
 
@@ -506,24 +628,17 @@ def set_attack(*args):
     ctx = dash.callback_context
     if not ctx.triggered:
         return "", {'display': 'none'}
-
     btn = ctx.triggered[0]['prop_id'].split('.')[0]
     mapping = {
-        'btn-none': "NONE",
-        'btn-replay': "REPLAY",
-        'btn-timing': "TIMING",
-        'btn-fdo': "FDO",
-        'btn-flood': "FLOOD",
-        'btn-mimic': "MIMIC"
+        'btn-none': "NONE", 'btn-replay': "REPLAY",
+        'btn-timing': "TIMING", 'btn-fdo': "FDO",
+        'btn-flood': "FLOOD", 'btn-mimic': "MIMIC"
     }
     active_attack = mapping[btn]
     return f"Active Attack: {active_attack}", {
-        'display': 'block',
-        'backgroundColor': '#ffaa00',
-        'color': 'black',
-        'padding': '10px',
-        'borderRadius': '8px',
-        'marginBottom': '20px'
+        'display': 'block', 'backgroundColor': '#ffaa00',
+        'color': 'black', 'padding': '10px',
+        'borderRadius': '8px', 'marginBottom': '20px'
     }
 
 # =========================
@@ -534,8 +649,10 @@ def set_attack(*args):
     Output('network-bti', 'children'),
     Output('active-nodes', 'children'),
     Output('network-alerts', 'children'),
+    Output('node-alerts', 'children'),
     Output('network-bti-graph', 'figure'),
     Output('message-log', 'children'),
+    Output('network-message-log', 'children'),
     Input('interval', 'n_intervals'),
     prevent_initial_call=True
 )
@@ -563,10 +680,8 @@ def update(n):
         if alert_text:
             alert_count += 1
 
-        online = is_online(node_id)
+        online  = is_online(node_id)
         sensors = node_data[node_id]['sensors']
-
-        # Pass F T D P into node_card
         cards.append(node_card(node_id, bti_val, sensors, online, alert_text, F, T, D, P))
 
     net_bti = compute_network_bti()
@@ -587,7 +702,23 @@ def update(n):
 
     log = [html.Div(f"-> {m}") for m in message_log[-15:]]
 
-    return cards, f"{net_bti:.3f}", str(len(known_nodes)), str(alert_count), fig, log
+    # Inter-node message log
+    net_msg_rows = []
+    if network_messages:
+        net_msg_rows = [network_message_row(nm) for nm in list(network_messages)[:20]]
+    else:
+        net_msg_rows = [html.P("No inter-node messages yet...", style={'color': '#555', 'fontSize': '12px'})]
+
+    return (
+        cards,
+        f"{net_bti:.3f}",
+        str(len(known_nodes)),
+        str(alert_count),
+        str(network_alert_count),
+        fig,
+        log,
+        net_msg_rows
+    )
 
 # =========================
 # DOWNLOAD
