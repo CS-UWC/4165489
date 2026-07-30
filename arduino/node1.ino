@@ -8,8 +8,8 @@
 // =========================
 #define WIFI_SSID     "WifiNAme" // Replace with name of your Wifi
 #define WIFI_PASS     "WifiPass"  // Replace with the password of your Wifi
-#define MQTT_BROKER   "192.168.1.X"  // Replace with Rock Pi IP
-#define MQTT_PORT     1883
+#define MQTT_BROKER   "xxx.xxx.X.X"  // Replace with Rock Pi IP
+#define MQTT_PORT     xxxx
 #define MQTT_USER     "esp32user"  // Replace with MQTT user name for ESP32
 #define MQTT_PASS     "yourpassword"  // Replace with the password you set
 
