@@ -52,7 +52,7 @@ active_attack = "NONE"
 # MQTT
 # =========================
 MQTT_USER = "esp32user"
-MQTT_PASS = "mano7210"
+MQTT_PASS = "XXXXXX"
 
 def on_message(client, userdata, msg):
     global network_alert_count
