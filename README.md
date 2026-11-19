@@ -4,6 +4,10 @@
  
 ---
  
+> **Scope and ethics:** the attack clients in `src/` are research tooling for this isolated testbed only. They authenticate to a broker you control and publish telemetry-shaped MQTT messages to evaluate the trust score. They do not exploit vulnerabilities or flood network infrastructure. Run them only on networks you own or are explicitly authorised to test.
+ 
+---
+ 
 ## Abstract
  
 The Internet of Things (IoT) relies on continuous communication between heterogeneous and resource-constrained devices, making it highly susceptible to cyber threats. Behaviour-based trust scoring has emerged as a promising approach for dynamically evaluating device reliability beyond static authentication mechanisms. However, existing work often assumes that behavioural metrics are inherently trustworthy and resistant to adversarial manipulation.
@@ -28,8 +32,9 @@ The system evaluates node trustworthiness using a **Behavioural Trust Index (BTI
  
 ```
 ESP32 Node 1 (DHT11 + MQ-131)  ──┐
-ESP32 Node 2 (Sound + Light)   ──┤──► Mosquitto MQTT Broker (Rock Pi Gateway)
-ESP32 Node 3 (Testing/Future)  ──┘         │
+ESP32 Node 2 (Sound + Light)   ──┤
+ESP32 Node 4 (AHT20 + Light)   ──┤──► Mosquitto MQTT Broker (Rock Pi Gateway)
+Nano Node 3 (Distance + Reed)  ──┘         │
                                             ▼
                                  Dash-based Monitoring Dashboard
                                  BTI Computation Engine
@@ -157,11 +162,35 @@ GPIO 32  →   Light AOUT    Analog signal
  
 ---
  
-### ESP32 Node 3
-- Currently in testing phase — sensor selection pending
-- Publishes heartbeat data (uptime, IP, RSSI) for network presence validation
-- Future implementation will include adversarial firmware for attack simulation
-- No wiring required — USB power only
+### Arduino Nano Node 3 — HC-SR04 + Reed Switch
+
+![Node 3 Schematic](images/node3.png)
+
+- HC-SR04 ultrasonic sensor (distance/proximity) and KY-025 reed switch (magnet)
+- Connected by USB serial to the Rock Pi at 115200 baud
+- `node3_bridge.py` parses the serial frames and publishes `iot/node3/data`
+- Reed DO: HIGH = magnet; Reed AO: 10-bit (0–1023); distances below 5 cm discarded
+ 
+---
+ 
+### ESP32 Node 4 — AHT20 + Ambient Light
+
+![Node 4 Schematic](images/node4.png)
+
+```
+ESP32 Pin    Sensor        Notes
+─────────────────────────────────────────────────────
+3.3V     →   AHT20 VCC     3.3V — bottom RIGHT of board
+GND      →   AHT20 GND     Ground
+GPIO 21  →   AHT20 SDA     I2C data (Wire default)
+GPIO 22  →   AHT20 SCL     I2C clock (Wire default)
+3.3V     →   LDR VCC       3.3V — bottom RIGHT of board
+GND      →   LDR GND       Ground
+GPIO 34  →   LDR AOUT      Analog signal (ADC1, 12-bit)
+```
+ 
+> `light_v` is the raw ADC value converted to volts (raw × 3.3 / 4095). Alerts are emitted at temperature above 35 °C and raw light above 3000.
+ 
 ---
  
 ## Software Requirements
@@ -286,7 +315,8 @@ mosquitto_pub -h localhost -u esp32user -P yourpassword -t "iot/node1/data" \
 |-------|-----------|-------------|
 | `iot/node1/data` | Node → Broker | Node 1 sensor readings |
 | `iot/node2/data` | Node → Broker | Node 2 sensor readings |
-| `iot/node3/data` | Node → Broker | Node 3 heartbeat |
+| `iot/node3/data` | Bridge → Broker | Node 3 distance and reed readings |
+| `iot/node4/data` | Node → Broker | Node 4 sensor readings |
 | `iot/nodeX/command` | Broker → Node | Commands to a node (e.g. PING) |
 | `iot/network/status` | Node → Broker | Node online/offline announcements |
  
@@ -479,7 +509,6 @@ MQTT_PASS = "YOUR_MQTT_PASSWORD"
 ## Project Structure
  
 ```
-├── app.py                  # Main dashboard and BTI computation engine
 ├── README.md               # This file
 ├── requirements.txt        # Python dependencies
 ├── SCHEMATIC.txt           # Text-based wiring reference
@@ -487,11 +516,23 @@ MQTT_PASS = "YOUR_MQTT_PASSWORD"
 │   ├── architecture.png    # Full system architecture diagram
 │   ├── esp32.png           # ESP32-WROOM-32 pinout reference
 │   ├── node1.png           # Node 1 wiring schematic (Wokwi)
-│   └── node2.png           # Node 2 wiring schematic (Wokwi)
-├── arduino/
-│   ├── node1/              # DHT11 + MQ-131 firmware
-│   ├── node2/              # Sound + Light firmware
-│   └── node3/              # Testing node — sensor TBD
+│   ├── node2.png           # Node 2 wiring schematic (Wokwi)
+│   ├── node3.png           # Node 3 wiring schematic (Arduino Nano)
+│   └── node4.png           # Node 4 wiring schematic (AHT20 + LDR)
+├── arduino/src/
+│   ├── node1.ino           # DHT11 + MQ-131 firmware
+│   ├── node2.ino           # Sound + Light firmware
+│   ├── node4.ino           # AHT20 + Light firmware
+│   └── nano_node3.ino      # Arduino Nano — distance + reed (serial)
+├── src/
+│   ├── app.py              # Main dashboard and BTI computation engine
+│   ├── node3_bridge.py     # Serial-to-MQTT bridge for node3
+│   ├── capture.py          # Capture and profile learning
+│   ├── Attack_*.py         # Protocol-compliant attack clients
+│   └── ...                 # Analysis and reporting tools
+├── scripts/                # Iteration runner
+├── results/                # Result summaries and per-run CSVs
+├── docs/                   # Reproduction and demo notes
 ```
  
 ---
