@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#define MQTT_MAX_PACKET_SIZE 512
 #include <PubSubClient.h>
 #include <DHT.h>
 #include <ArduinoJson.h>
@@ -6,12 +7,12 @@
 // =========================
 // CONFIG
 // =========================
-#define WIFI_SSID     "WifiNAme" // Replace with name of your Wifi
-#define WIFI_PASS     "WifiPass"  // Replace with the password of your Wifi
-#define MQTT_BROKER   "xxx.xxx.X.X"  // Replace with Rock Pi IP
-#define MQTT_PORT     xxxx
-#define MQTT_USER     "esp32user"  // Replace with MQTT user name for ESP32
-#define MQTT_PASS     "yourpassword"  // Replace with the password you set
+#define WIFI_SSID     "WifiNAme"       // Replace with name of your Wifi
+#define WIFI_PASS     "WifiPass"       // Replace with the password of your Wifi
+#define MQTT_BROKER   "xxx.xxx.X.X"    // Replace with Rock Pi IP
+#define MQTT_PORT     1883
+#define MQTT_USER     "esp32user"      // Replace with MQTT user name for ESP32
+#define MQTT_PASS     "yourpassword"   // Replace with the password you set
 
 #define DHT_PIN      4
 #define DHT_TYPE     DHT11
@@ -34,6 +35,7 @@ const char* PUB_STATUS  = "iot/network/status";
 const char* SUB_COMMAND = "iot/node1/command";
 const char* SUB_NODE2   = "iot/node2/data";
 const char* SUB_NODE3   = "iot/node3/data";
+const char* SUB_NODE4   = "iot/node4/data";
 const char* SUB_NETWORK = "iot/network/message";
 
 // =========================
@@ -44,6 +46,7 @@ float node3_distance = 0;
 bool  node3_magnet   = false;
 bool  node2_online   = false;
 bool  node3_online   = false;
+bool  node4_online   = false;
 int   network_alerts = 0;
 
 // =========================
@@ -78,13 +81,13 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
       float temp     = dht.readTemperature();
       float humidity = dht.readHumidity();
       int   ozone    = analogRead(MQ131_PIN);
-      StaticJsonDocument<256> doc;
+      StaticJsonDocument<1024> doc;
       doc["node"]      = "node1";
       doc["temp"]      = temp;
       doc["humidity"]  = humidity;
       doc["ozone"]     = ozone;
       doc["requested"] = true;
-      char buf[256];
+      char buf[1024];
       serializeJson(doc, buf);
       mqtt.publish(PUB_DATA, buf);
     }
@@ -92,7 +95,7 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
 
   // ── Data from Node 2 ──
   if (String(topic) == "iot/node2/data") {
-    StaticJsonDocument<300> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, msg);
     if (!err) {
       node2_sound  = doc["sound"] | 0;
@@ -111,7 +114,7 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
 
   // ── Data from Node 3 ──
   if (String(topic) == "iot/node3/data") {
-    StaticJsonDocument<350> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, msg);
     if (!err) {
       node3_distance = doc["distance"] | 0.0;
@@ -137,6 +140,25 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
     }
   }
 
+  // ── Data from Node 4 ──
+  if (String(topic) == "iot/node4/data") {
+    StaticJsonDocument<1024> doc;
+    DeserializationError err = deserializeJson(doc, msg);
+    if (!err) {
+      float n4_light = doc["light"] | 0;
+      node4_online   = true;
+      Serial.println("Node4 light:" + String(n4_light));
+
+      // React if the LDR reading is very high
+      if (n4_light > 3000) {
+        String alert = "{\"from\":\"node1\",\"alert\":\"Node4 light level high\",\"value\":"
+                       + String(n4_light) + "}";
+        mqtt.publish("iot/network/message", alert.c_str());
+        Serial.println("Alert sent: Node4 light high");
+      }
+    }
+  }
+
   // ── Network-wide messages ──
   if (String(topic) == "iot/network/message") {
     Serial.println("NETWORK MSG: " + msg);
@@ -158,6 +180,7 @@ void connectMQTT() {
       mqtt.subscribe(SUB_COMMAND);
       mqtt.subscribe(SUB_NODE2);
       mqtt.subscribe(SUB_NODE3);
+      mqtt.subscribe(SUB_NODE4);
       mqtt.subscribe(SUB_NETWORK);
       mqtt.publish(PUB_STATUS, "{\"node\":\"node1\",\"status\":\"online\"}");
       mqtt.publish("iot/network/message",
@@ -194,6 +217,11 @@ void setup() {
   connectWiFi();
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setCallback(onMessage);
+  if (mqtt.setBufferSize(512)) {
+    Serial.println("MQTT buffer: " + String(mqtt.getBufferSize()) + " bytes");
+  } else {
+    Serial.println("MQTT buffer resize FAILED");
+  }
   connectMQTT();
 }
 
@@ -244,7 +272,7 @@ void loop() {
   Serial.print("Net alerts:   "); Serial.println(network_alerts);
 
   // Build JSON
-  StaticJsonDocument<350> doc;
+  StaticJsonDocument<1024> doc;
   doc["node"]           = "node1";
   doc["temp"]           = temp;
   doc["humidity"]       = humidity;
@@ -254,16 +282,23 @@ void loop() {
   doc["rssi"]           = WiFi.RSSI();
   doc["node2_online"]   = node2_online;
   doc["node3_online"]   = node3_online;
+  doc["node4_online"]   = node4_online;
   doc["node2_sound"]    = node2_sound;
   doc["node3_distance"] = node3_distance;
   doc["node3_magnet"]   = node3_magnet;
   doc["network_alerts"] = network_alerts;
 
-  char buffer[350];
-  serializeJson(doc, buffer);
+  char buffer[1024];
+  size_t jsonLen = serializeJson(doc, buffer);
 
-  mqtt.publish(PUB_DATA, buffer);
-  Serial.println("Published: " + String(buffer));
+  bool sent = mqtt.publish(PUB_DATA, buffer);
+  if (sent) {
+    Serial.println("Published (" + String(jsonLen) + "B): " + String(buffer));
+  } else {
+    Serial.println("PUBLISH FAILED on " + String(PUB_DATA) + " jsonLen=" + String(jsonLen)
+                   + " packetNeed=" + String(jsonLen + strlen(PUB_DATA) + 4)
+                   + " mqttBuffer=" + String(mqtt.getBufferSize()));
+  }
 
   delay(2000);
 }
