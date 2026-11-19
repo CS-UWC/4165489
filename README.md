@@ -547,21 +547,27 @@ The following components have been successfully implemented and tested:
 - Behavioural Trust Index (BTI) computation engine
 - Sliding-window behavioural analysis
 - Exponential smoothing trust decay
+- Per-node anomaly detection on calibrated sensor fields
 - Nginx reverse proxy configuration
 - Secure Cloudflare Tunnel deployment
-- ESP32 Node 1 and Node 2 device communication
+- ESP32 Node 1, Node 2 and Node 4 device communication
+- Arduino Nano Node 3 serial-to-MQTT bridge (`node3_bridge.py`)
 - PDF-based monitoring report generation
-- Simulated attack injection controls
-### Remaining Phases
+- Protocol-compliant attack clients for all five scenarios
+- Three-repeat experimental campaign and archived result summaries
+### Completed Scenarios
  
-- Full sensor integration on all nodes
-- Development of adversarial ESP32 firmware
 - Replay attack implementation
 - Timing manipulation experiments
 - False data injection scenarios
 - Traffic flooding experiments
 - Behaviour-mimicking attack evaluation
 - Trust robustness analysis and experimental data collection
+### Future Work
+ 
+- Independent validation of the rate-aware scoring variant on new captures
+- More repeats and additional device types to establish stability
+- Adaptive per-node thresholds learned from longer baselines
 ---
  
 ## Academic Context
