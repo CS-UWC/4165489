@@ -1,331 +1,172 @@
 ================================================================
-  IoT TRUST-BASED MONITORING SYSTEM — WIRING SCHEMATICS
-  Evaluating Trust-Based Robustness in Heterogeneous IoT Networks
-  Lavhelani Mano — 4165489 — University of the Western Cape
+  IoT TRUST MONITORING TESTBED - WIRING REFERENCE
+  Honours Project 4165489 - University of the Western Cape
 ================================================================
 
-================================================================
-  BOARD USED: ESP32-WROOM-32 DevKit V1 (38-pin)
-  Reference: www.mischianti.org ESP32-WROOM-32 pinout
-  All nodes use the same board model
-================================================================
-
-  ESP32-WROOM-32 PINOUT (as seen from TOP, USB at bottom)
-
-  LEFT SIDE (top to bottom)         RIGHT SIDE (top to bottom)
-  ──────────────────────────         ──────────────────────────
-  EN                                 GPIO23
-  GPIO36  (input only / SensVP)      GPIO22
-  GPIO39  (input only / SensVN)      GPIO1   (TXD0)
-  GPIO34  (input only)               GPIO3   (RXD0)
-  GPIO35  (input only)               GPIO21
-  GPIO32                             GPIO19
-  GPIO33                             GPIO18
-  GPIO25                             GPIO5
-  GPIO26                             GPIO17  (TXD2)
-  GPIO27                             GPIO16  (RXD2)
-  GPIO14                             GPIO4
-  GPIO12                             GPIO2   (onboard LED)
-  GND                                GPIO15
-  GPIO13                             GND
-  D2  (flash — avoid)                3.3V    ◄── right side 3.3V
-  D3  (flash — avoid)                GND     ◄── right side GND
-  CMD (flash — avoid)
-  VIN  (5V from USB)   ◄── left side bottom
-  GND                  ◄── left side bottom
-
-  IMPORTANT:
-  - 3.3V pin is on the BOTTOM RIGHT of the board
-  - VIN (5V) pin is on the BOTTOM LEFT of the board
-  - They are on OPPOSITE sides — do not mix them up
-
+  This is a text reference. Wiring diagrams are in images/:
+    node1.png  - ESP32 + DHT11 + MQ-131
+    node2.png  - ESP32 + sound + light
+    node3.png  - Arduino Nano + HC-SR04 + reed switch
+    node4.png  - ESP32 + AHT20 + LDR
+    esp32.png  - ESP32-WROOM-32 pinout
+    architecture.png - full system diagram
+  node3.png and node4.png can be regenerated with docs/make_node_diagrams.py.
+  All values below describe the final four-node testbed.
 
 ================================================================
-  NODE 1 — ESP32-WROOM-32 + DHT11 + MQ-131
+  BOARDS USED
 ================================================================
 
-  WIRING DIAGRAM (viewed from top, USB port at bottom):
+  node1, node2, node4 : ESP32-WROOM-32 DevKit V1 (38-pin)
+  node3               : Arduino Nano (USB serial to gateway)
 
-                    ┌─────────────┐
-               EN ──┤             ├── GPIO23
-           GPIO36 ──┤             ├── GPIO22
-           GPIO39 ──┤             ├── GPIO1 (TX)
-           GPIO34 ──┤ ESP32-WROOM ├── GPIO3 (RX)
-           GPIO35 ──┤             ├── GPIO21
-           GPIO32 ──┤     -32     ├── GPIO19
-           GPIO33 ──┤             ├── GPIO18
-           GPIO25 ──┤             ├── GPIO5
-           GPIO26 ──┤             ├── GPIO17
-           GPIO27 ──┤             ├── GPIO16
-           GPIO14 ──┤             ├── GPIO4  ────────► DHT11 DATA
-           GPIO12 ──┤             ├── GPIO2
-              GND ──┤             ├── GPIO15
-           GPIO13 ──┤             ├── GND
-                    │    [BOOT]   │
-              GND ──┤             ├── 3.3V ──────────► DHT11 VCC
-              VIN ──┤   [micro    ├── GND  ──────────► DHT11 GND
-        (5V/USB)    │    USB ]    │
-                    └─────────────┘
-    MQ-131 VCC ◄─── VIN  (left side bottom — 5V)
-    MQ-131 GND ◄─── GND  (left side bottom)
-    MQ-131 AOUT ◄── GPIO34 (left side — input only, analog)
+  ESP32 pin reminder (viewed from top, USB at bottom):
+    3.3V is on the BOTTOM RIGHT of the board.
+    VIN (5V) is on the BOTTOM LEFT of the board.
+    They are on OPPOSITE sides - do not mix them up.
 
-  CONNECTION TABLE:
-
-  ESP32 Pin        Sensor Pin      Wire
-  ─────────────────────────────────────────
-  3.3V (right)  ── DHT11 VCC       Red
-  GND  (right)  ── DHT11 GND       Black
-  GPIO4         ── DHT11 DATA      Green
-
-  VIN  (left)   ── MQ-131 VCC      Red   (5V — MUST use VIN)
-  GND  (left)   ── MQ-131 GND      Black
-  GPIO34        ── MQ-131 AOUT     Yellow
-
-  DHT11 MODULE WIRING:
-  ┌─────────────────────────────────────────┐
-  │  3-pin module        4-pin bare chip    │
-  │  ┌──────────┐        ┌──────────┐       │
-  │  │ VCC ─────┼─ 3.3V  │ Pin1 ────┼─ 3.3V │
-  │  │ DATA ────┼─ GPIO4 │ Pin2 ────┼─ GPIO4│
-  │  │ GND ─────┼─ GND   │ Pin3 ────┼─ NC   │
-  │  └──────────┘        │ Pin4 ────┼─ GND  │
-  │                      └──────────┘       │
-  │  * 4-pin bare chip needs a 10kΩ         │
-  │    pull-up resistor between DATA        │
-  │    and VCC — modules have it built in   │
-  └─────────────────────────────────────────┘
-
-  MQ-131 WIRING:
-  ┌─────────────────────────────────────────────────────┐
-  │  MQ-131 Pin    ESP32 Pin     Notes                  │
-  │  ──────────    ─────────     ───────────────────    │
-  │  VCC      ──── VIN           5V — left side bottom  │
-  │  GND      ──── GND           left side bottom       │
-  │  AOUT     ──── GPIO34        analog input only pin  │
-  │  DOUT     ──── not used                             │
-  │                                                     │
-  │  VOLTAGE WARNING:                                   │
-  │  MQ-131 AOUT can output up to 5V                    │
-  │  ESP32 GPIO max is 3.3V                             │
-  │  Add a voltage divider for protection:              │
-  │                                                     │
-  │  AOUT ──► 10kΩ ──┬──► GPIO34                       │
-  │                  │                                  │
-  │                 20kΩ                                │
-  │                  │                                  │
-  │                 GND                                 │
-  │                                                     │
-  │  WARMUP: MQ-131 needs 60 seconds on first power-on  │
-  │  The sketch shows a countdown in Serial Monitor     │
-  └─────────────────────────────────────────────────────┘
-
+  Only ADC1 pins may be used for analog reads while Wi-Fi is active.
+  On this board that means GPIO 32-39 (ADC2 is unavailable with Wi-Fi).
 
 ================================================================
-  NODE 2 — ESP32-WROOM-32 + SOUND SENSOR + LIGHT SENSOR
+  NODE 1 - ESP32 + DHT11 + MQ-131
 ================================================================
 
-  WIRING DIAGRAM:
+  ESP32 pin        Sensor pin      Notes
+  ------------------------------------------------------------
+  3.3V (right)  -> DHT11 VCC       3.3V
+  GND           -> DHT11 GND       Ground
+  GPIO 4        -> DHT11 DATA      Digital
 
-                    ┌─────────────┐
-               EN ──┤             ├── GPIO23
-           GPIO36 ──┤             ├── GPIO22
-           GPIO39 ──┤             ├── GPIO1 (TX)
-           GPIO34 ──┤ ESP32-WROOM ├── GPIO3 (RX)
-           GPIO35 ──┤             ├── GPIO21
-           GPIO32 ──┤     -32     ├── GPIO19
-           GPIO33 ──┤             ├── GPIO18
-           GPIO25 ──┤             ├── GPIO5
-           GPIO26 ──┤             ├── GPIO17
-           GPIO27 ──┤             ├── GPIO16
-           GPIO14 ──┤             ├── GPIO4
-           GPIO12 ──┤             ├── GPIO2
-              GND ──┤             ├── GPIO15
-           GPIO13 ──┤             ├── GND
-                    │    [BOOT]   │
-              GND ──┤             ├── 3.3V ──┬─► Sound VCC
-              VIN ──┤   [micro    ├── GND  ──┼─► Sound GND
-                    │    USB ]    │          └─► Light VCC
-                    └─────────────┘              Light GND (to any GND)
+  VIN (left)    -> MQ-131 VCC      5V (must use VIN)
+  GND (left)    -> MQ-131 GND      Ground
+  GPIO 34       -> MQ-131 AOUT     Analog, input-only pin
 
-    Sound AOUT ◄─── GPIO35 (left side — input only, analog)
-    Light AOUT ◄─── GPIO32 (left side — analog capable)
+  Notes:
+  - Bare DHT11 (4-pin chip) needs a 10k pull-up from DATA to VCC.
+    Modules include the pull-up already.
+  - MQ-131 needs a 60 second warm-up on first power-on.
+  - MQ-131 AOUT can reach 5V, above the ESP32 GPIO limit of 3.3V.
+    Use a divider, e.g.:
 
-  CONNECTION TABLE:
-
-  ESP32 Pin        Sensor Pin       Wire
-  ──────────────────────────────────────────
-  3.3V (right)  ── Sound VCC        Red
-  GND  (right)  ── Sound GND        Black
-  GPIO35        ── Sound AOUT       Yellow
-
-  3.3V (right)  ── Light VCC        Red
-  GND  (any)    ── Light GND        Black
-  GPIO32        ── Light AOUT       Green
-
-  SOUND SENSOR:
-  ┌─────────────────────────────────────────────────────┐
-  │  KY-038 or generic analog mic module                │
-  │  VCC  ──── 3.3V (right side bottom)                 │
-  │  GND  ──── GND                                      │
-  │  AOUT ──── GPIO35  (analog level output)            │
-  │  DOUT ──── not used                                 │
-  │                                                     │
-  │  Adjust sensitivity with the potentiometer          │
-  │  on the module board                                │
-  └─────────────────────────────────────────────────────┘
-
-  LIGHT SENSOR:
-  ┌─────────────────────────────────────────────────────┐
-  │  Generic LDR analog module                          │
-  │  VCC  ──── 3.3V (right side bottom)                 │
-  │  GND  ──── GND                                      │
-  │  AOUT ──── GPIO32  (analog level output)            │
-  │                                                     │
-  │  If using a bare LDR chip (no module board):        │
-  │                                                     │
-  │  3.3V ──► 10kΩ ──┬──► GPIO32                       │
-  │                  │                                  │
-  │                 LDR                                 │
-  │                  │                                  │
-  │                 GND                                 │
-  └─────────────────────────────────────────────────────┘
-
+        AOUT -- 10k --+--> GPIO34
+                      |
+                     20k
+                      |
+                     GND
 
 ================================================================
-  NODE 3 — ESP32-WROOM-32 (TESTING PHASE — NO SENSORS)
+  NODE 2 - ESP32 + SOUND + LIGHT
 ================================================================
 
-  No wiring required.
-  Connect ESP32 to USB power only.
+  ESP32 pin        Sensor pin      Notes
+  ------------------------------------------------------------
+  3.3V (right)  -> Sound VCC       3.3V
+  GND           -> Sound GND       Ground
+  GPIO 35       -> Sound AOUT      Analog, input-only pin
 
-  Publishes to dashboard:
-    node    → "node3"
-    status  → "testing"
-    uptime  → seconds since boot
-    ip      → WiFi assigned IP
-    rssi    → WiFi signal strength (dBm)
+  3.3V (right)  -> Light VCC       3.3V
+  GND           -> Light GND       Ground
+  GPIO 32       -> Light AOUT      Analog (ADC1)
 
-  Sensor selection pending for future research phases.
-  See TODO comments inside the node3 Arduino sketch.
+  Notes:
+  - Generic analog microphone and LDR modules. Adjust the on-board
+    potentiometer for sensitivity.
+  - For a bare LDR: 3.3V -> 10k -> GPIO32, LDR from GPIO32 to GND.
 
+================================================================
+  NODE 3 - ARDUINO NANO + HC-SR04 + KY-025 REED SWITCH
+================================================================
+
+  Nano pin         Sensor pin      Notes
+  ------------------------------------------------------------
+  D5            -> HC-SR04 TRIG    Output
+  D6            -> HC-SR04 ECHO    Input
+  D7            -> Reed DO         Digital (HIGH = magnet)
+  A0            -> Reed AO         Analog (0-1023, 10-bit)
+  5V            -> Sensor VCC     As required by modules
+  GND           -> Sensor GND     Common ground with ESP32 boards
+
+  Important:
+  - This node has NO Wi-Fi stack. It sends semicolon-delimited frames over
+    USB serial at 115200 baud; node3_bridge.py on the gateway parses them and
+    publishes iot/node3/data.
+  - DIST below 5 cm or a -1 echo timeout is treated as a sensor fault, not a
+    real measurement. The last valid reading is retained.
+  - reed_v is not emitted; only reed_ao (10-bit) and the boolean reed state.
+
+  Serial frame format:
+    NODE=3;DIST=<cm>;PROX=<label>;REED=<magnet|clear>;REEDAO=<0-1023>;
+
+================================================================
+  NODE 4 - ESP32 + AHT20 + LDR (AMBIENT LIGHT)
+================================================================
+
+  ESP32 pin        Sensor pin      Notes
+  ------------------------------------------------------------
+  3.3V (right)  -> AHT20 VCC       3.3V
+  GND           -> AHT20 GND       Ground
+  GPIO 21       -> AHT20 SDA       I2C data (Wire default)
+  GPIO 22       -> AHT20 SCL       I2C clock (Wire default)
+
+  3.3V (right)  -> LDR VCC         3.3V
+  GND           -> LDR GND         Ground
+  GPIO 34       -> LDR AOUT        Analog (ADC1, 12-bit 0-4095)
+
+  Notes:
+  - Wire.begin() uses the default I2C pins, so no explicit SDA/SCL define.
+  - analogReadResolution(12) gives a 0-4095 raw light value.
+  - light_v = raw * (3.3 / 4095), rounded to two decimals in the payload.
+  - Thresholds: temperature > 35 C and raw light > 3000 emit network alerts.
 
 ================================================================
   POWER SUMMARY
 ================================================================
 
-  ┌────────┬─────────────┬──────────┬──────────────────────────┐
-  │ Node   │ Sensor      │ Voltage  │ ESP32 Pin                │
-  ├────────┼─────────────┼──────────┼──────────────────────────┤
-  │ Node 1 │ DHT11       │ 3.3V     │ 3.3V — RIGHT side bottom │
-  │ Node 1 │ MQ-131      │ 5V       │ VIN  — LEFT side bottom  │
-  │ Node 2 │ Sound       │ 3.3V     │ 3.3V — RIGHT side bottom │
-  │ Node 2 │ Light       │ 3.3V     │ 3.3V — RIGHT side bottom │
-  │ Node 3 │ None        │ USB only │ —                        │
-  └────────┴─────────────┴──────────┴──────────────────────────┘
+  Node   Sensor             Voltage   ESP32/board pin
+  ------------------------------------------------------------
+  node1  DHT11              3.3V      3.3V (right)
+  node1  MQ-131             5V        VIN (left)
+  node2  Sound              3.3V      3.3V (right)
+  node2  Light              3.3V      3.3V (right)
+  node3  HC-SR04 + reed     5V/3.3V   Nano (USB powered)
+  node4  AHT20              3.3V      3.3V (right)
+  node4  LDR                3.3V      GPIO34
 
-  All nodes powered via USB during testing.
-  For permanent deployment use a 5V 1A USB adapter per node.
-
-  REMEMBER:
-  3.3V is BOTTOM RIGHT
-  VIN (5V) is BOTTOM LEFT
-  These are on opposite sides of the board!
-
+  Use a separate 5V/1A USB supply per node for permanent deployment.
+  Keep VIN (5V) wiring separate from the 3.3V rail.
 
 ================================================================
-  BREADBOARD TIPS FOR ESP32-WROOM-32
+  MQTT TOPICS
 ================================================================
 
-  The ESP32-WROOM-32 is wide and spans most of a standard
-  400-point breadboard leaving very little space on each side.
-
-  SOLUTION 1 — 830-point breadboard (recommended)
-    Fits the ESP32 in the middle with rows free on both sides.
-
-  SOLUTION 2 — Jumper wires to free rows
-    Run male-to-male jumper wires from blocked ESP32 pins
-    to empty rows further along the breadboard, then
-    connect sensors to those rows.
-
-  SOLUTION 3 — Use the power rails
-    3.3V ──► breadboard (+) rail
-    GND  ──► breadboard (-) rail
-    Sensors draw power from the rails — frees up pin rows.
-    WARNING: Keep VIN (5V) wiring SEPARATE from the 3.3V rail.
-
-  SOLUTION 4 — Direct Dupont wires (skip breadboard)
-    Use female-to-female Dupont jumper wires directly from
-    sensor module pins to ESP32 pins. Works well for modules
-    that have their own PCB board.
-
+  iot/node1/data     node1 -> broker   temp, humidity, ozone, ...
+  iot/node2/data     node2 -> broker   sound, light, ...
+  iot/node3/data     bridge -> broker  distance, reed_ao, ...
+  iot/node4/data     node4 -> broker   temp, humidity, light, light_v, ...
+  iot/nodeX/command  broker -> node    PING / STATUS
+  iot/network/status nodes -> broker   online / alive announcements
+  iot/network/message nodes -> broker  peer alerts
 
 ================================================================
-  ARDUINO IDE SETUP FOR ESP32-WROOM-32
+  ARDUINO IDE SETUP
 ================================================================
 
-  STEP 1 — Add ESP32 board support URL
-    File → Preferences
-    Paste into "Additional Boards Manager URLs":
-    https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-    Click OK
+  ESP32 (node1, node2, node4):
+    Boards Manager URL:
+      https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+    Board: ESP32 Dev Module
+    Upload speed 115200, flash 80MHz, mode QIO, default 4MB scheme.
+    Libraries: PubSubClient, DHT sensor library (+ Adafruit Unified Sensor),
+               ArduinoJson, Adafruit AHTX0.
 
-  STEP 2 — Install ESP32 boards
-    Tools → Board → Boards Manager
-    Search: esp32
-    Install: esp32 by Espressif Systems
-    Wait for install to complete
+  Arduino Nano (node3):
+    Board: Arduino Nano, processor ATmega328P (Old Bootloader if needed).
+    Upload speed 115200 to match node3_bridge.py.
+    No extra libraries needed for the current sketch.
 
-  STEP 3 — Select board
-    Tools → Board → ESP32 Arduino → ESP32 Dev Module
-
-  STEP 4 — Upload settings
-    Tools → Upload Speed       → 115200
-    Tools → Flash Frequency    → 80MHz
-    Tools → Flash Mode         → QIO
-    Tools → Partition Scheme   → Default 4MB with spiffs
-    Tools → Core Debug Level   → None
-    Tools → Port               → COMx (Windows)
-                                 /dev/ttyUSB0 (Linux/Mac)
-
-  STEP 5 — Install libraries
-    Sketch → Include Library → Manage Libraries
-
-    Library                   Author
-    ──────────────────────────────────────────
-    PubSubClient              Nick O'Leary
-    DHT sensor library        Adafruit
-    Adafruit Unified Sensor   Adafruit
-    ArduinoJson               Benoit Blanchon
-
-    When installing DHT sensor library:
-    Click "Install All" when prompted for dependencies
-    This installs Adafruit Unified Sensor automatically
-
-  STEP 6 — Upload sketch
-    Connect ESP32 via USB
-    Click Upload in Arduino IDE
-    If upload fails: hold BOOT button on ESP32 while
-    clicking Upload, release once upload starts
-
-  COMMON ERRORS:
-  ┌─────────────────────────────────────────────────────┐
-  │ "Failed to connect to ESP32"                        │
-  │  → Hold BOOT button during upload                   │
-  │                                                     │
-  │ "Port not found" / no COM port showing              │
-  │  → Install CP2102 USB-to-UART driver:               │
-  │    silabs.com/developers/usb-to-uart-bridge-vcp-drivers│
-  │                                                     │
-  │ "Brownout detector was triggered"                   │
-  │  → Bad USB cable, try a different one               │
-  │  → Use a powered USB hub                            │
-  │                                                     │
-  │ DHT sensor returns NaN                              │
-  │  → Check wiring, add 10kΩ pull-up on DATA pin       │
-  │  → Increase delay between reads to 2000ms           │
-  └─────────────────────────────────────────────────────┘
-
+  If upload fails on ESP32, hold BOOT during upload and release once it starts.
+  A "brownout detector" error usually means a poor USB cable - try another.
 
 ================================================================
   END OF SCHEMATIC

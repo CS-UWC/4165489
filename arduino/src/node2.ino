@@ -1,20 +1,22 @@
 #include <WiFi.h>
+#define MQTT_MAX_PACKET_SIZE 512
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
 // =========================
 // CONFIG
 // =========================
-#define WIFI_SSID     "WifiNAme" // Replace with name of your Wifi
-#define WIFI_PASS     "WifiPass"  // Replace with the password of your Wifi
-#define MQTT_BROKER   "xxx.xxx.X.X"  // Replace with Rock Pi IP
-#define MQTT_PORT     xxxx
-#define MQTT_USER     "esp32user"  // Replace with MQTT user name for ESP32
+#define WIFI_SSID     "WifiNAme"       // Replace with name of your Wifi
+#define WIFI_PASS     "WifiPass"       // Replace with the password of your Wifi
+#define MQTT_BROKER   "xxx.xxx.X.X"    // Replace with Rock Pi IP
+#define MQTT_PORT     1883
+#define MQTT_USER     "esp32user"      // Replace with MQTT user name for ESP32
+#define MQTT_PASS     "yourpassword"   // Replace with the password you set
 
-#define MIC_PIN      35   // microphone analog out
-#define RED_PIN      27   // KY-016 red
-#define GREEN_PIN    26   // KY-016 green
-#define BLUE_PIN     25   // KY-016 blue
+#define MIC_PIN      35
+#define RED_PIN      27
+#define GREEN_PIN    26
+#define BLUE_PIN     25
 
 #define NODE_ID      "node2"
 
@@ -32,6 +34,7 @@ const char* PUB_STATUS  = "iot/network/status";
 const char* SUB_COMMAND = "iot/node2/command";
 const char* SUB_NODE1   = "iot/node1/data";
 const char* SUB_NODE3   = "iot/node3/data";
+const char* SUB_NODE4   = "iot/node4/data";
 const char* SUB_NETWORK = "iot/network/message";
 
 // =========================
@@ -43,6 +46,8 @@ int   node1_ozone    = 0;
 int   node3_uptime   = 0;
 bool  node1_online   = false;
 bool  node3_online   = false;
+bool  node4_online   = false;
+int   network_alerts = 0;
 
 // =========================
 // LED HELPER
@@ -60,19 +65,18 @@ void ledOff() {
 
 // =========================
 // SOUND LEVEL → LED COLOR
-// Green  = quiet      (raw < 1500)
-// Yellow = medium     (raw 1500–3000)
-// Red    = loud       (raw > 3000)
-// Blue   = alert from another node
+// Green  = quiet    (raw < 1500)
+// Yellow = medium   (raw 1500–3000)
+// Red    = loud     (raw > 3000)
 // Purple = MQTT disconnected
 // =========================
 void updateLED(int sound) {
   if (sound > 3000) {
-    setColor(255, 0, 0);    // red — loud
+    setColor(255, 0, 0);
   } else if (sound > 1500) {
-    setColor(255, 165, 0);  // yellow — medium
+    setColor(255, 165, 0);
   } else {
-    setColor(0, 255, 0);    // green — quiet
+    setColor(0, 255, 0);
   }
 }
 
@@ -82,19 +86,21 @@ void updateLED(int sound) {
 void connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Connecting to WiFi");
-  setColor(0, 0, 255);  // blue while connecting
+  setColor(0, 0, 255);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
   Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
-  setColor(0, 255, 0);  // green when connected
+  setColor(0, 255, 0);
   delay(500);
   ledOff();
 }
 
 // =========================
 // MQTT RECEIVE
+// No delays inside here — delays block mqtt.loop()
+// and cause disconnections
 // =========================
 void onMessage(char* topic, byte* payload, unsigned int length) {
   String msg = "";
@@ -102,30 +108,26 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
 
   Serial.println("MSG from [" + String(topic) + "]: " + msg);
 
-  // Commands from dashboard
+  // ── Commands from dashboard ──
   if (String(topic) == "iot/node2/command") {
     if (msg == "PING") {
       mqtt.publish(PUB_STATUS, "{\"node\":\"node2\",\"status\":\"alive\"}");
-      // Flash white on PING
-      setColor(255, 255, 255);
-      delay(200);
-      ledOff();
     }
     if (msg == "STATUS") {
       int sound = analogRead(MIC_PIN);
-      StaticJsonDocument<200> doc;
+      StaticJsonDocument<1024> doc;
       doc["node"]      = "node2";
       doc["sound"]     = sound;
       doc["requested"] = true;
-      char buf[200];
+      char buf[1024];
       serializeJson(doc, buf);
       mqtt.publish(PUB_DATA, buf);
     }
   }
 
-  // Data from Node 1
+  // ── Data from Node 1 ──
   if (String(topic) == "iot/node1/data") {
-    StaticJsonDocument<300> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, msg);
     if (!err) {
       node1_temp     = doc["temp"]     | 0.0;
@@ -137,23 +139,13 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
                      " humidity:" + String(node1_humidity) +
                      " ozone:" + String(node1_ozone));
 
-      // Flash blue briefly when node1 data arrives
-      setColor(0, 0, 255);
-      delay(100);
-
       // Alert if node1 temp is high
       if (node1_temp > 35.0) {
         String alert = "{\"from\":\"node2\",\"alert\":\"Node1 high temperature\",\"value\":"
                        + String(node1_temp) + "}";
         mqtt.publish("iot/network/message", alert.c_str());
         Serial.println("Alert sent: Node1 high temp");
-        // Flash red rapidly for temp alert
-        for (int i = 0; i < 3; i++) {
-          setColor(255, 0, 0);
-          delay(150);
-          ledOff();
-          delay(150);
-        }
+        network_alerts++;
       }
 
       // Alert if node1 ozone is high
@@ -162,20 +154,14 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
                        + String(node1_ozone) + "}";
         mqtt.publish("iot/network/message", alert.c_str());
         Serial.println("Alert sent: Node1 high ozone");
-        // Flash purple for ozone alert
-        for (int i = 0; i < 3; i++) {
-          setColor(128, 0, 128);
-          delay(150);
-          ledOff();
-          delay(150);
-        }
+        network_alerts++;
       }
     }
   }
 
-  // Data from Node 3
+  // ── Data from Node 3 ──
   if (String(topic) == "iot/node3/data") {
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, msg);
     if (!err) {
       node3_uptime = doc["uptime"] | 0;
@@ -184,12 +170,19 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  // Network-wide messages
+  // ── Data from Node 4 ──
+  if (String(topic) == "iot/node4/data") {
+    StaticJsonDocument<1024> doc;
+    DeserializationError err = deserializeJson(doc, msg);
+    if (!err) {
+      node4_online = true;
+      Serial.println("Node4 → online");
+    }
+  }
+
+  // ── Network-wide messages ──
   if (String(topic) == "iot/network/message") {
     Serial.println("NETWORK MSG: " + msg);
-    // Flash cyan on any network message
-    setColor(0, 255, 255);
-    delay(150);
   }
 }
 
@@ -197,18 +190,20 @@ void onMessage(char* topic, byte* payload, unsigned int length) {
 // MQTT CONNECT
 // =========================
 void connectMQTT() {
-  setColor(128, 0, 128);  // purple while connecting to MQTT
+  setColor(128, 0, 128);
   while (!mqtt.connected()) {
     Serial.print("Connecting to MQTT...");
     if (mqtt.connect(NODE_ID, MQTT_USER, MQTT_PASS)) {
       Serial.println("connected");
       mqtt.subscribe(SUB_COMMAND);
       mqtt.subscribe(SUB_NODE1);
-      mqtt.subscribe(SUB_NODE3);
-      mqtt.subscribe(SUB_NETWORK);
+mqtt.subscribe(SUB_NODE3);
+    mqtt.subscribe(SUB_NODE4);
+    mqtt.subscribe(SUB_NETWORK);
       mqtt.publish(PUB_STATUS, "{\"node\":\"node2\",\"status\":\"online\"}");
-      mqtt.publish("iot/network/message", "{\"from\":\"node2\",\"event\":\"joined\"}");
-      setColor(0, 255, 0);  // green when connected
+      mqtt.publish("iot/network/message",
+                   "{\"from\":\"node2\",\"event\":\"joined\"}");
+      setColor(0, 255, 0);
       delay(500);
       ledOff();
     } else {
@@ -230,7 +225,7 @@ void setup() {
   pinMode(BLUE_PIN,  OUTPUT);
   ledOff();
 
-  // Startup flash — white
+  // Startup flash white
   setColor(255, 255, 255);
   delay(300);
   ledOff();
@@ -238,6 +233,8 @@ void setup() {
   connectWiFi();
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setCallback(onMessage);
+  mqtt.setBufferSize(512);
+  Serial.println("MQTT buffer: " + String(mqtt.getBufferSize()) + " bytes");
   connectMQTT();
 }
 
@@ -246,7 +243,7 @@ void setup() {
 // =========================
 void loop() {
   if (!mqtt.connected()) {
-    setColor(128, 0, 128);  // purple when disconnected
+    setColor(128, 0, 128);
     connectMQTT();
   }
   mqtt.loop();
@@ -258,7 +255,7 @@ void loop() {
   updateLED(sound);
 
   // Build JSON
-  StaticJsonDocument<300> doc;
+  StaticJsonDocument<1024> doc;
   doc["node"]         = "node2";
   doc["sound"]        = sound;
   doc["sound_v"]      = round(sound_v * 100) / 100.0;
@@ -266,8 +263,10 @@ void loop() {
   doc["rssi"]         = WiFi.RSSI();
   doc["node1_online"] = node1_online;
   doc["node3_online"] = node3_online;
+  doc["node4_online"] = node4_online;
+  doc["network_alerts"] = network_alerts;
 
-  char buffer[300];
+  char buffer[1024];
   serializeJson(doc, buffer);
 
   mqtt.publish(PUB_DATA, buffer);
