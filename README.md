@@ -1,256 +1,545 @@
-# IoT Trust Testbed — Honours Project (4165489)
-
-**Evaluating trust-based robustness in a heterogeneous IoT network**
-
-A hardware testbed that computes a **Behavioural Trust Index (BTI)** from live
-MQTT telemetry and measures how that score responds to protocol-compliant
-attacks. Three ESP32 nodes and one Arduino Nano publish sensor readings to a
-broker on a gateway; a Dash dashboard scores each node in real time.
-
-> **Security note:** every credential, device address and tunnel URL in this
-> repository is a placeholder. Real values belong in a local `.env` file (see
-> `.env.example`) and must never be committed.
-
-> **Scope and ethics:** the attack clients in `src/` are research tooling for
-> this project's isolated testbed only. They authenticate to a broker you
-> control and publish telemetry-shaped MQTT messages to evaluate the behaviour
-> of the trust score. They do not exploit vulnerabilities, target external
-> systems or flood network infrastructure. Run them only on a network you own
-> or are explicitly authorised to test.
-
+# 4165489
+ 
+# Evaluating Trust-Based Robustness in Heterogeneous IoT Networks
+ 
 ---
-
+ 
 ## Abstract
-
-Trust scores can complement device authentication by tracking behaviour after a
-device joins an IoT network, but the evidence used to calculate those scores may
-itself be manipulated. This project evaluates a fixed Behavioural Trust Index
-and a separate anomaly detector on a heterogeneous hardware testbed. An
-authenticated attack client publishes alongside each physical device to its
-existing topic, so the experiment evaluates combined topic traffic rather than
-attributing an effect to a compromised device. The archived campaign contains
-three independent runs per node and attack for replay, timing manipulation,
-false data injection (FDI), flooding and behaviour mimicry. Results show that
-FDI is repeatedly flagged while the original frequency term can reward elevated
-message rates, motivating a post-hoc rate-aware sensitivity analysis.
-
+ 
+The Internet of Things (IoT) relies on continuous communication between heterogeneous and resource-constrained devices, making it highly susceptible to cyber threats. Behaviour-based trust scoring has emerged as a promising approach for dynamically evaluating device reliability beyond static authentication mechanisms. However, existing work often assumes that behavioural metrics are inherently trustworthy and resistant to adversarial manipulation.
+ 
+This study investigates the robustness of behaviour-based trust scoring under communication-level attacks in IoT environments. A hardware-based testbed is developed using ESP32 sensor nodes and a Rock Pi gateway, where device behaviour is monitored and evaluated using a Behavioural Trust Index (BTI). Controlled adversarial scenarios — including replay attacks, timing manipulation, and false data injection — are introduced to assess whether trust scores can be influenced by protocol-compliant malicious behaviour.
+ 
+**Keywords:** Internet of Things, IoT Security, Trust Management, Behaviour-Based Trust, Anomaly Detection, Adversarial Attacks, MQTT, Embedded Systems
+ 
 ---
-
-## Project overview
-
-The system evaluates node trustworthiness from four observable communication
-metrics — message frequency (**F**), inter-arrival timing (**T**), sensor data
-stability (**D**) and packet size consistency (**P**) — aggregated into a
-per-node score and a network-wide score. Controlled adversarial scenarios are
-used to evaluate the resilience of the BTI under realistic, protocol-compliant
-conditions.
-
-All experiments were run on an isolated testbed. Attacks publish telemetry only;
-they do not flood network infrastructure or interact with any external system.
-
+ 
+## Project Overview
+ 
+This repository contains the full implementation of the experimental IoT testbed developed for this Honours research project. The system integrates real-time MQTT communication, behavioural monitoring, dynamic trust computation, secure deployment infrastructure, and IoT device connectivity within a unified framework.
+ 
+The system evaluates node trustworthiness using a **Behavioural Trust Index (BTI)** computed from four observable communication metrics: message frequency (F), inter-arrival timing (T), sensor data stability (D), and packet size consistency (P). These are aggregated into a per-node trust score and a network-wide score, with controlled adversarial scenarios used to evaluate the resilience of the BTI under realistic attack conditions.
+ 
 ---
-
-## System architecture
-
+ 
+## System Architecture
+ 
+![System Architecture](images/architecture.png)
+ 
 ```
-  ESP32  node1  (DHT11 + MQ-131)   -- WiFi --> Mosquitto broker (gateway)
-  ESP32  node2  (sound + light)    -- WiFi --> Mosquitto broker (gateway)
-  ESP32  node4  (AHT20 + light)    -- WiFi --> Mosquitto broker (gateway)
-  Nano   node3  (ultrasonic+reed) -- USB serial --> node3_bridge.py --> broker
-                                                        |
-                                                        v
-                                     Dash dashboard + BTI engine
-                                     PDF report generation
-                                                        |
-                                        Nginx reverse proxy / tunnel
+ESP32 Node 1 (DHT11 + MQ-131)  ──┐
+ESP32 Node 2 (Sound + Light)   ──┤──► Mosquitto MQTT Broker (Rock Pi Gateway)
+ESP32 Node 3 (Testing/Future)  ──┘         │
+                                            ▼
+                                 Dash-based Monitoring Dashboard
+                                 BTI Computation Engine
+                                 PDF Report Generation
+                                            │
+                               ┌────────────┴────────────┐
+                               ▼                         ▼
+                     Nginx Reverse Proxy        Cloudflare Tunnel
+                     Local network access       Secure remote access
 ```
-
-| Node | Board | Sensors | Topic | Transport |
-|------|-------|---------|-------|-----------|
-| node1 | ESP32-WROOM-32 | DHT11 (temp, humidity), MQ-131 (ozone) | `iot/node1/data` | Wi-Fi / MQTT |
-| node2 | ESP32-WROOM-32 | Analog sound, analog light | `iot/node2/data` | Wi-Fi / MQTT |
-| node3 | Arduino Nano | HC-SR04 (distance), KY-025 reed switch | `iot/node3/data` | USB serial → `node3_bridge.py` |
-| node4 | ESP32-WROOM-32 | AHT20 (temp, humidity), LDR (light) | `iot/node4/data` | Wi-Fi / MQTT |
-
-Nodes subscribe to each other's topics to carry peer-liveness and network
-alert state in their payloads. The dashboard subscribes to `iot/#`, so a new
-node publishing `iot/nodeX/data` appears without code changes.
-
+ 
 ---
-
-## Behavioural Trust Index (BTI)
-
+ 
+## BTI Model
+ 
+The Behavioural Trust Index aggregates observable communication metrics into a continuous trust score per device:
+ 
 ```
 BTI = w1·F + w2·T + w3·D + w4·P
 ```
-
-| Metric | Meaning | Weight |
-|--------|---------|--------|
-| F | Message frequency consistency | 0.25 |
-| T | Inter-arrival timing consistency | 0.30 |
-| D | Sensor data stability | 0.25 |
-| P | Packet size consistency | 0.20 |
-
-Weights sum to 1. Temporal decay uses exponential smoothing:
-
+ 
+Where:
+- **F** — Message frequency consistency
+- **T** — Inter-arrival timing consistency
+- **D** — Sensor data stability
+- **P** — Packet size consistency
+Weights satisfy: w1 + w2 + w3 + w4 = 1
+ 
+To account for temporal behaviour and reduce the influence of outdated observations, a trust decay mechanism is applied via exponential smoothing:
+ 
 ```
-BTI(t) = α · BTI(t-1) + (1 - α) · CurrentScore     (α = 0.7)
+BTI(t) = α · BTI(t-1) + (1 - α) · CurrentScore
 ```
-
-| Score | Status |
-|-------|--------|
-| 0.7 – 1.0 | Stable — no anomaly |
-| 0.4 – 0.7 | Moderate instability |
-| 0.0 – 0.4 | Critical trust degradation |
-
-A separate per-node anomaly detector scores only numeric fields present in that
-node's own baseline. Feature sets therefore differ per node — for example node3
-uses distance, reed analog output and RSSI, while node4 uses temperature,
-humidity, light, light voltage and RSSI.
-
+ 
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| α (alpha) | 0.7 | Smoothing factor — controls trust decay rate |
+| w1 | 0.25 | Weight for Frequency (F) |
+| w2 | 0.30 | Weight for Timing (T) |
+| w3 | 0.25 | Weight for Data consistency (D) |
+| w4 | 0.20 | Weight for Payload structure (P) |
+ 
+### BTI Thresholds
+ 
+| Score | Status | Colour |
+|-------|--------|--------|
+| 0.7 – 1.0 | Stable — no anomaly | Green |
+| 0.4 – 0.7 | Moderate instability | Yellow |
+| 0.0 – 0.4 | Critical trust degradation | Red |
+ 
 ---
-
-## Adversarial scenarios
-
-| Attack | Behavioural change | Main metric affected |
-|--------|--------------------|----------------------|
-| Replay | Repeats previously captured valid messages | F, T |
-| Timing manipulation | Varies inter-arrival timing | T |
-| False data injection | Perturbs sensor fields with range-bounded values | D |
-| Flooding | Raises message rate | F |
-| Mimicry | Drifts one sensor field slowly toward the mean | D |
-
-The attack clients (`src/Attack_*.py`) learn a payload profile from the broker
-before publishing, so injected messages keep the same schema and topic as the
-real device.
-
+ 
+## Adversarial Scenarios
+ 
+The following protocol-compliant attacks are evaluated against the BTI framework:
+ 
+| Attack | Behavioural Change | Expected Effect | Risk Level |
+|--------|-------------------|-----------------|------------|
+| Replay Attack | Repeated valid messages | May maintain high trust | Medium |
+| Timing Manipulation | Slight delay variation | Minor trust degradation | High |
+| False Data Injection | Incorrect sensor values | Affects data stability (D) | High |
+| Traffic Flooding | Increased frequency | Distorts metric F | Medium |
+| Mimic Attack | Matches normal patterns | Trust remains high | Critical |
+ 
 ---
-
-## Results summary
-
-Three repeats per node and attack. "Flagged" is the share of attack-phase
-messages marked anomalous; "BTI change" is the mean change in the archived BTI.
-
-| Attack | Flagged | BTI change |
-|--------|---------|------------|
-| False data injection | 49.8 – 64.7% | −3.0% to −11.0% |
-| Replay | usually low (node4 2.2 – 27.6%) | variable |
-| Timing manipulation | 0 – 4.8% | −3.6% to −7.5% |
-| Flooding | 0 – 1.2% | +4.5% to +6.0% |
-| Mimicry (node-aware rerun) | node3/node4 ≈ 25%, node2 mostly missed, node1 variable | small |
-
-The flooding result exposed a weakness: the original frequency term *rewarded*
-elevated rates. A post-hoc sensitivity analysis replaces that term with a
-symmetric rate penalty and recomputes the same smoothed score on archived
-messages, producing a 25.2 – 26.5% BTI reduction for flooding. This is a
-counterfactual analysis of logged data, not a new experiment.
-
-Full tables and per-run figures are in [`results/`](results/). See
-[`docs/REPRODUCE.md`](docs/REPRODUCE.md) for how to regenerate them.
-
----
-
+ 
 ## Hardware
-
-### Gateway
-
-A Rock Pi 4 SE runs the Mosquitto broker, the Dash dashboard, the serial
-bridge for node3, Nginx and an outbound tunnel client for remote viewing.
-
-### ESP32 boards (node1, node2, node4)
-
-ESP32-WROOM-32 DevKit V1 (38-pin). Note: **3.3 V is on the bottom right** and
-**VIN (5 V) is on the bottom left** — opposite sides of the board.
-
-- **node1** — DHT11 on GPIO 4 (3.3 V); MQ-131 analogue on GPIO 34 (5 V via VIN,
-  with a voltage divider; allow 60 s warm-up).
-- **node2** — sound on GPIO 35, light on GPIO 32 (both 3.3 V, both input-capable).
-- **node4** — AHT20 on I²C (SDA GPIO 21, SCL GPIO 22); LDR on GPIO 34
-  (ADC1, 12-bit). `light_v` is the raw ADC converted to volts.
-
-  ![Node 4 wiring](images/node4.png)
-
-### Arduino Nano (node3)
-
-HC-SR04 on D5 (trigger) / D6 (echo); KY-025 reed switch on D7 (digital) and A0
-(analogue). Connected by USB to the gateway; `node3_bridge.py` reads the serial
-frames at 115200 baud and republishes them as JSON to `iot/node3/data`.
-
-![Node 3 wiring](images/node3.png)
-
-Node1 and node2 wiring diagrams are in [`images/`](images/) (`node1.png`,
-`node2.png`), alongside the ESP32 pinout (`esp32.png`) and the full system
-diagram (`architecture.png`). Full wiring tables are in
-[`SCHEMATIC.txt`](SCHEMATIC.txt). The node3/node4 diagrams are generated by a
-script kept with the project documentation so they can be regenerated.
-
+ 
+### Rock Pi 4SE (Central Gateway)
+- Runs Mosquitto MQTT broker
+- Runs the Python Dash monitoring dashboard
+- Hosts Nginx reverse proxy and Cloudflare Tunnel
+- Acts as the network gateway for all IoT nodes
 ---
-
-## Software setup
-
-### Install dependencies
-
-On the gateway:
-
-```bash
-python3 -m pip install -r requirements.txt
+ 
+### ESP32 Board — ESP32-WROOM-32 DevKit V1
+ 
+All nodes use the ESP32-WROOM-32 DevKit V1 (38-pin). Key pins used in this project:
+ 
+![ESP32-WROOM-32 Pinout](images/esp32.png)
+ 
+> Note: **3.3V is on the bottom RIGHT** and **VIN (5V) is on the bottom LEFT** of the board — they are on opposite sides.
+ 
+---
+ 
+### ESP32 Node 1 — DHT11 + MQ-131
+ 
+![Node 1 Schematic](images/node1.png)
+ 
+> **Schematic note:** The diagram above uses a **DHT22** and **MQ-2** as visual stand-ins due to component availability in the simulation tool (Wokwi). The actual hardware uses a **DHT11** (temperature + humidity) and **MQ-131** (ozone sensor). Wiring is identical for both substitutions. The ESP32 board model shown also differs visually — actual board is the ESP32-WROOM-32 DevKit V1 shown above.
+ 
 ```
-
-Install Mosquitto and create an authenticated user; see the broker notes in
-[`docs/REPRODUCE.md`](docs/REPRODUCE.md). Configure credentials through `.env`
-or environment variables — the source files contain no real secrets.
-
-### Run the system
-
+ESP32 Pin    Sensor        Notes
+─────────────────────────────────────────────────────
+3.3V     →   DHT11 VCC     3.3V — bottom RIGHT of board
+GND      →   DHT11 GND     Ground
+GPIO 4   →   DHT11 DATA    Digital signal
+VIN      →   MQ-131 VCC    5V — bottom LEFT of board (MUST be 5V)
+GND      →   MQ-131 GND    Ground
+GPIO 34  →   MQ-131 AOUT   Analog signal (input only pin)
+```
+ 
+> MQ-131 requires 5V power via the VIN pin and a 60-second warmup period before readings are reliable. GPIO 34 is input-only on the ESP32-WROOM-32 — correct for analog reads.
+ 
+---
+ 
+### ESP32 Node 2 — Sound + Light
+ 
+![Node 2 Schematic](images/node2.png)
+ 
+> **Schematic note:** The diagram above uses an **LDR module** and a **potentiometer** as stand-ins for the light and sound sensors due to component availability in Wokwi. The LDR module represents the light sensor and the potentiometer represents the sound sensor analog output. The resistor shown is part of the LDR voltage divider circuit. Actual hardware uses a generic analog sound module and a generic analog light/LDR module. Wiring connections are identical.
+ 
+```
+ESP32 Pin    Sensor        Notes
+──────────────────────────────────────────────────────
+3.3V     →   Sound VCC     3.3V — bottom RIGHT of board
+GND      →   Sound GND     Ground
+GPIO 35  →   Sound AOUT    Analog signal (input only pin)
+3.3V     →   Light VCC     3.3V — bottom RIGHT of board
+GND      →   Light GND     Ground
+GPIO 32  →   Light AOUT    Analog signal
+```
+ 
+> Both sensors operate on 3.3V — safe for all ESP32 GPIO pins. GPIO 35 is input-only on the ESP32-WROOM-32 — correct for analog reads.
+ 
+---
+ 
+### ESP32 Node 3
+- Currently in testing phase — sensor selection pending
+- Publishes heartbeat data (uptime, IP, RSSI) for network presence validation
+- Future implementation will include adversarial firmware for attack simulation
+- No wiring required — USB power only
+---
+ 
+## Software Requirements
+ 
+### Rock Pi (Python)
+ 
 ```bash
-# broker
+sudo apt install python3-numpy python3-matplotlib python3-reportlab
+pip3 install dash paho-mqtt
+```
+ 
+Or use the requirements file:
+```bash
+pip3 install -r requirements.txt
+```
+ 
+`requirements.txt`:
+```
+dash
+paho-mqtt
+numpy
+matplotlib
+reportlab
+```
+ 
+### Arduino IDE (ESP32-WROOM-32 DevKit V1)
+ 
+Install via **Sketch → Include Library → Manage Libraries**:
+ 
+| Library | Author |
+|---------|--------|
+| PubSubClient | Nick O'Leary |
+| DHT sensor library | Adafruit |
+| Adafruit Unified Sensor | Adafruit |
+| ArduinoJson | Benoit Blanchon |
+ 
+Install the ESP32 board:
+ 
+1. Open **File → Preferences**
+2. Add this URL to Additional Boards Manager URLs:
+   ```
+   https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+   ```
+3. Go to **Tools → Board → Boards Manager**
+4. Search `esp32` and install **esp32 by Espressif Systems**
+5. Select: **Tools → Board → ESP32 Arduino → ESP32 Dev Module**
+6. Set upload settings:
+   - Upload Speed: `115200`
+   - Flash Frequency: `80MHz`
+   - Flash Mode: `QIO`
+   - Partition Scheme: `Default 4MB with spiffs`
+> When installing DHT sensor library, click **Install All** when prompted — this installs Adafruit Unified Sensor automatically.
+ 
+---
+ 
+## MQTT Broker Setup (Mosquitto)
+ 
+### Install
+```bash
+sudo apt install mosquitto mosquitto-clients
+```
+ 
+### Configuration `/etc/mosquitto/mosquitto.conf`
+```
+pid_file /run/mosquitto/mosquitto.pid
+persistence true
+persistence_location /var/lib/mosquitto/
+log_dest file /var/log/mosquitto/mosquitto.log
+log_type all
+listener 1883
+protocol mqtt
+listener 9001
+protocol websockets
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+acl_file /etc/mosquitto/acl
+```
+ 
+The broker supports:
+- Standard MQTT communication over port 1883
+- WebSocket-based MQTT over port 9001
+- Real-time topic subscription and message distribution
+- Multiple concurrent client connections
+### Create MQTT user
+```bash
+sudo mosquitto_passwd -c /etc/mosquitto/passwd esp32user
+```
+ 
+### ACL file `/etc/mosquitto/acl`
+```
+user esp32user
+topic #
+ 
+user device01
+topic #
+ 
+user dashboard
+topic #
+```
+ 
+### Restart and verify
+```bash
+sudo systemctl restart mosquitto
+sudo systemctl status mosquitto
+```
+ 
+### Test connection
+```bash
+# Terminal 1 — subscribe
+mosquitto_sub -h localhost -u esp32user -P yourpassword -t "iot/#" -v
+ 
+# Terminal 2 — publish test message
+mosquitto_pub -h localhost -u esp32user -P yourpassword -t "iot/node1/data" \
+  -m '{"node":"node1","temp":25,"humidity":60,"ozone":100,"ip":"xxx.xxx.xxx.xxx","rssi":-50}'
+```
+ 
+---
+ 
+## MQTT Topic Structure
+ 
+| Topic | Direction | Description |
+|-------|-----------|-------------|
+| `iot/node1/data` | Node → Broker | Node 1 sensor readings |
+| `iot/node2/data` | Node → Broker | Node 2 sensor readings |
+| `iot/node3/data` | Node → Broker | Node 3 heartbeat |
+| `iot/nodeX/command` | Broker → Node | Commands to a node (e.g. PING) |
+| `iot/network/status` | Node → Broker | Node online/offline announcements |
+ 
+The dashboard subscribes to `iot/#` — any new node publishing to `iot/nodeX/data` appears automatically without code changes.
+ 
+---
+ 
+## Running the Dashboard
+ 
+### Start the app
+```bash
+python3 app.py
+```
+ 
+Access locally at:
+```
+http://YOUR_ROCK_PI_IP:5000
+```
+ 
+---
+ 
+## Nginx Reverse Proxy
+ 
+Nginx routes incoming HTTP requests on port 80 to the internal Dash monitoring application, providing clean local access without specifying a port.
+ 
+### Install
+```bash
+sudo apt install nginx
+```
+ 
+### Configuration `/etc/nginx/sites-available/iot-dashboard`
+```nginx
+server {
+    listen 80;
+    server_name _;
+ 
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400;
+    }
+}
+```
+ 
+### Enable and start
+```bash
+sudo ln -s /etc/nginx/sites-available/iot-dashboard /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+sudo systemctl enable nginx
+```
+ 
+Access via:
+```
+http://YOUR_ROCK_PI_IP
+```
+ 
+---
+ 
+## Cloudflare Tunnel (Secure Remote Access)
+ 
+Cloudflare Tunnel securely exposes the local IoT monitoring system to external networks without requiring direct port forwarding or public IP exposure. This simulates a realistic cloud-connected IoT environment while maintaining secure access to the experimental system.
+ 
+### Install cloudflared
+```bash
+# For ARM64 (aarch64)
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
+sudo dpkg -i cloudflared-linux-arm64.deb
+ 
+# For ARM 32-bit (armv7l)
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm.deb
+sudo dpkg -i cloudflared-linux-arm.deb
+```
+ 
+Check your architecture:
+```bash
+uname -m
+# aarch64 = use arm64
+# armv7l  = use arm
+```
+ 
+### Quick tunnel (temporary public URL)
+```bash
+cloudflared tunnel --url http://localhost:5000
+# or if running from download directory
+./cloudflared tunnel --url http://localhost:5000
+```
+ 
+This provides a temporary HTTPS URL:
+```
+https://xxxx-xxxx-xxxx.trycloudflare.com
+```
+ 
+### Persistent named tunnel
+```bash
+cloudflared tunnel login
+cloudflared tunnel create iot-dashboard
+cloudflared tunnel route dns iot-dashboard yourdomain.com
+cloudflared tunnel run iot-dashboard
+```
+ 
+### Run as a service
+```bash
+sudo cloudflared service install
+sudo systemctl start cloudflared
+sudo systemctl enable cloudflared
+```
+ 
+The deployment provides:
+- HTTPS-encrypted communication
+- Secure remote dashboard accessibility
+- Protection of internal network addresses
+- Simplified external connectivity for evaluation and demonstration
+---
+ 
+## Full Startup Sequence
+ 
+```bash
+# 1. Start MQTT broker
 sudo systemctl start mosquitto
-
-# dashboard (binds 0.0.0.0:5000)
-python3 src/app.py
-
-# node3 serial bridge
-python3 src/node3_bridge.py
+ 
+# 2. Start dashboard
+python3 app.py &
+ 
+# 3. Start Nginx
+sudo systemctl start nginx
+ 
+# 4. Start Cloudflare tunnel
+cloudflared tunnel --url http://localhost:5000
 ```
-
-Preflight checks (`src/preflight.py`) verify that all four node schemas match
-before a capture run. The dashboard additionally supports local report export.
-
-### Firmware
-
-Sketches live in [`arduino/src/`](arduino/src/):
-
-| File | Board |
-|------|-------|
-| `node1.ino` | ESP32 — DHT11 + MQ-131 |
-| `node2.ino` | ESP32 — sound + light |
-| `node4.ino` | ESP32 — AHT20 + light |
-| `nano_node3.ino` | Arduino Nano — ultrasonic + reed (serial) |
-
-Replace the placeholder Wi-Fi/MQTT values before flashing. Do not commit the
-filled-in sketches.
-
+ 
+### Auto-start on boot
+ 
+Enable services:
+```bash
+sudo systemctl enable mosquitto
+sudo systemctl enable nginx
+sudo systemctl enable cloudflared
+```
+ 
+Create a systemd service for the Python app `/etc/systemd/system/iot-dashboard.service`:
+```ini
+[Unit]
+Description=IoT Trust Monitoring Dashboard
+After=network.target mosquitto.service
+ 
+[Service]
+User=dreamx
+WorkingDirectory=/home/dreamx/
+ExecStart=/usr/bin/python3 /home/dreamx/app.py
+Restart=always
+ 
+[Install]
+WantedBy=multi-user.target
+```
+ 
+Enable it:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable iot-dashboard
+sudo systemctl start iot-dashboard
+```
+ 
 ---
-
-## Repository layout
-
+ 
+## Configuration
+ 
+Update these values in each ESP32 sketch before flashing:
+ 
+```cpp
+#define WIFI_SSID    "YOUR_WIFI_NAME"
+#define WIFI_PASS    "YOUR_WIFI_PASSWORD"
+#define MQTT_BROKER  "YOUR_ROCK_PI_IP"
+#define MQTT_USER    "esp32user"
+#define MQTT_PASS    "YOUR_MQTT_PASSWORD"
 ```
-arduino/src/     Final firmware for all four nodes
-src/             Dashboard, serial bridge, attack clients, capture/analysis tools
-scripts/         Iteration runner
-results/         Archived summaries and per-run CSVs
-docs/            Reproduction and demo notes
-images/          Pinouts and wiring diagrams
+ 
+Update in `app.py`:
+```python
+MQTT_USER = "esp32user"
+MQTT_PASS = "YOUR_MQTT_PASSWORD"
 ```
-
+ 
 ---
-
-## Academic context
-
-Submitted in partial fulfilment of the Honours degree in Computer Science at
-the University of the Western Cape.
-
+ 
+## Project Structure
+ 
+```
+├── app.py                  # Main dashboard and BTI computation engine
+├── README.md               # This file
+├── requirements.txt        # Python dependencies
+├── SCHEMATIC.txt           # Text-based wiring reference
+├── images/
+│   ├── architecture.png    # Full system architecture diagram
+│   ├── esp32.png           # ESP32-WROOM-32 pinout reference
+│   ├── node1.png           # Node 1 wiring schematic (Wokwi)
+│   └── node2.png           # Node 2 wiring schematic (Wokwi)
+├── arduino/
+│   ├── node1/              # DHT11 + MQ-131 firmware
+│   ├── node2/              # Sound + Light firmware
+│   └── node3/              # Testing node — sensor TBD
+```
+ 
+---
+ 
+## Current Implementation Status
+ 
+The following components have been successfully implemented and tested:
+ 
+- MQTT communication infrastructure (Mosquitto broker)
+- Dash-based behavioural monitoring dashboard
+- Real-time MQTT message processing
+- Behavioural Trust Index (BTI) computation engine
+- Sliding-window behavioural analysis
+- Exponential smoothing trust decay
+- Nginx reverse proxy configuration
+- Secure Cloudflare Tunnel deployment
+- ESP32 Node 1 and Node 2 device communication
+- PDF-based monitoring report generation
+- Simulated attack injection controls
+### Remaining Phases
+ 
+- Full sensor integration on all nodes
+- Development of adversarial ESP32 firmware
+- Replay attack implementation
+- Timing manipulation experiments
+- False data injection scenarios
+- Traffic flooding experiments
+- Behaviour-mimicking attack evaluation
+- Trust robustness analysis and experimental data collection
+---
+ 
+## Academic Context
+ 
+This project is submitted in partial fulfilment of the requirements for the Honours degree in Computer Science at the University of the Western Cape. It demonstrates:
+ 
+- IoT network trust evaluation using behavioural metrics
+- Real-time monitoring with multi-node MQTT communication
+- Attack detection and simulation in IoT environments
+- Secure broker configuration with authentication and ACL
+- Dynamic dashboard design for scalable node monitoring
+- Network deployment using Nginx reverse proxy and Cloudflare tunnelling
+- Empirical evaluation of trust scoring as a potential attack surface
+---
+ 
 ## Author
-
-**Lavhelani Mano** — 4165489
-Honours Project, University of the Western Cape, Department of Computer Science
+ 
+**Lavhelani Mano**
+Student Number: 4165489
+Email: 4165489@myuwc.ac.za
+Honours Project — University of the Western Cape
+Department of Computer Science
